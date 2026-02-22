@@ -52,15 +52,6 @@ export const AuthProvider = ({ children }) => {
     [setSession]
   );
 
-  const bootstrapAdmin = useCallback(
-    async (payload) => {
-      const response = await authApi.register(payload);
-      setSession(response.token, response.user);
-      return response.user;
-    },
-    [setSession]
-  );
-
   const logout = useCallback(() => {
     clearSession();
   }, [clearSession]);
@@ -81,11 +72,10 @@ export const AuthProvider = ({ children }) => {
       user: state.user,
       isAuthenticated: Boolean(state.token && state.user),
       login,
-      bootstrapAdmin,
       logout,
       refreshProfile
     }),
-    [state, login, bootstrapAdmin, logout, refreshProfile]
+    [state, login, logout, refreshProfile]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

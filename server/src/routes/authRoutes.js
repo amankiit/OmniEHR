@@ -1,7 +1,7 @@
 import express from "express";
 import bcrypt from "bcryptjs";
 import User from "../models/User.js";
-import { registerSchema, loginSchema } from "../services/validation.js";
+import { loginSchema } from "../services/validation.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/apiError.js";
 import { signAccessToken } from "../utils/jwt.js";
@@ -19,45 +19,6 @@ const formatUser = (user) => ({
   lastLoginAt: user.lastLoginAt,
   createdAt: user.createdAt
 });
-
-router.post(
-  "/register",
-  asyncHandler(async (req, res) => {
-    const payload = registerSchema.parse(req.body);
-    const existingUsers = await User.countDocuments();
-
-    if (existingUsers > 0) {
-      throw new ApiError(
-        403,
-        "Bootstrap registration is disabled. Ask an admin to provision accounts."
-      );
-    }
-
-    const emailInUse = await User.findOne({ email: payload.email });
-    if (emailInUse) {
-      throw new ApiError(409, "Email is already in use");
-    }
-
-    const passwordHash = await bcrypt.hash(payload.password, 12);
-
-    const user = await User.create({
-      email: payload.email,
-      fullName: payload.fullName,
-      organization: payload.organization,
-      passwordHash,
-      role: "admin"
-    });
-
-    const token = signAccessToken({
-      sub: String(user._id),
-      email: user.email,
-      role: user.role,
-      name: user.fullName
-    });
-
-    res.status(201).json({ token, user: formatUser(user), bootstrap: true });
-  })
-);
 
 router.post(
   "/login",

@@ -3,18 +3,10 @@ import { Link, Navigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const defaultLogin = { email: "", password: "" };
-const defaultBootstrap = {
-  fullName: "",
-  email: "",
-  organization: "",
-  password: ""
-};
 
 const LoginPage = () => {
-  const { isAuthenticated, login, bootstrapAdmin } = useAuth();
+  const { isAuthenticated, login } = useAuth();
   const [loginForm, setLoginForm] = useState(defaultLogin);
-  const [bootstrapForm, setBootstrapForm] = useState(defaultBootstrap);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -26,28 +18,11 @@ const LoginPage = () => {
     event.preventDefault();
     setLoading(true);
     setError("");
-    setMessage("");
 
     try {
       await login(loginForm);
     } catch (err) {
       setError(err.message || "Unable to sign in");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onBootstrapSubmit = async (event) => {
-    event.preventDefault();
-    setLoading(true);
-    setError("");
-    setMessage("");
-
-    try {
-      await bootstrapAdmin(bootstrapForm);
-      setMessage("Bootstrap admin created. You are now signed in.");
-    } catch (err) {
-      setError(err.message || "Unable to bootstrap admin");
     } finally {
       setLoading(false);
     }
@@ -94,62 +69,7 @@ const LoginPage = () => {
         </p>
       </section>
 
-      <section className="card">
-        <h2>First-time setup</h2>
-        <p className="muted-text">
-          Create the initial admin account when the system has no users.
-        </p>
-        <form onSubmit={onBootstrapSubmit} className="form-grid">
-          <label>
-            Full name
-            <input
-              value={bootstrapForm.fullName}
-              onChange={(event) =>
-                setBootstrapForm((prev) => ({ ...prev, fullName: event.target.value }))
-              }
-              required
-            />
-          </label>
-          <label>
-            Organization
-            <input
-              value={bootstrapForm.organization}
-              onChange={(event) =>
-                setBootstrapForm((prev) => ({ ...prev, organization: event.target.value }))
-              }
-            />
-          </label>
-          <label>
-            Email
-            <input
-              type="email"
-              value={bootstrapForm.email}
-              onChange={(event) =>
-                setBootstrapForm((prev) => ({ ...prev, email: event.target.value }))
-              }
-              required
-            />
-          </label>
-          <label>
-            Password
-            <input
-              type="password"
-              value={bootstrapForm.password}
-              onChange={(event) =>
-                setBootstrapForm((prev) => ({ ...prev, password: event.target.value }))
-              }
-              placeholder="At least 12 chars with upper/lower/number/symbol"
-              required
-            />
-          </label>
-          <button type="submit" className="button button-secondary" disabled={loading}>
-            {loading ? "Provisioning..." : "Bootstrap admin"}
-          </button>
-        </form>
-      </section>
-
       {error ? <p className="banner banner-error">{error}</p> : null}
-      {message ? <p className="banner banner-success">{message}</p> : null}
     </div>
   );
 };

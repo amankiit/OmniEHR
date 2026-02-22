@@ -18,7 +18,7 @@ This repository implements major technical safeguards (access control, audit tra
 ## Major EHR features
 
 - User authentication and role-based access (`admin`, `practitioner`, `auditor`)
-- Bootstrap admin flow + admin user provisioning
+- Admin-only user provisioning
 - Patient registry with encrypted demographics (at-rest encryption for PHI fields)
 - Patient self-registration portal (`/patient-register`) with automatic 7-digit PID assignment
 - Automatic 7-digit PID assignment for every new patient (portal + admin-created)
@@ -98,8 +98,7 @@ Public:
   - JWT bearer tokens
   - RBAC middleware by role
 - Access provisioning:
-  - One-time bootstrap registration for first admin account
-  - Admin endpoint for creating additional users
+  - Admin endpoint for creating users (including additional admins)
   - Patient creation through FHIR is admin-only
 - Encryption:
   - AES-256-GCM for patient PHI fields (name/contact/address)
