@@ -13,7 +13,8 @@ const linksByRole = {
   core: [
     { to: "/", label: "Dashboard", end: true },
     { to: "/patients", label: "Patients" },
-    { to: "/schedule", label: "Schedule", badgeKey: "appointments" }
+    { to: "/schedule", label: "Schedule", badgeKey: "appointments" },
+    { to: "/command-center", label: "Command Center", roles: ["admin", "practitioner"] }
   ],
   admin: [{ to: "/users", label: "Users" }],
   compliance: [{ to: "/audit", label: "Audit Logs", roles: ["admin", "auditor"] }]
@@ -116,6 +117,14 @@ const NavBar = () => {
 
     return linksByRole.admin;
   }, [user?.role]);
+
+  const coreLinks = useMemo(
+    () =>
+      linksByRole.core.filter((link) =>
+        link.roles ? link.roles.includes(user?.role) : true
+      ),
+    [user?.role]
+  );
 
   const complianceLinks = useMemo(
     () =>
@@ -289,7 +298,7 @@ const NavBar = () => {
         <div className="sidebar-content">
           <NavGroup
             title="Workspace"
-            links={linksByRole.core}
+            links={coreLinks}
             onNavigate={closeMenu}
             unreadCount={unreadCount}
           />

@@ -4,6 +4,7 @@ import NavBar from "./NavBar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const knownLabels = {
+  "command-center": "Command Center",
   patients: "Patients",
   schedule: "Schedule",
   users: "Users",
@@ -84,6 +85,11 @@ const AppShell = () => {
             <Link to="/schedule" className="workspace-chip-link">
               Schedule
             </Link>
+            {(user?.role === "admin" || user?.role === "practitioner") ? (
+              <Link to="/command-center" className="workspace-chip-link">
+                Command Center
+              </Link>
+            ) : null}
             {user?.role === "admin" ? (
               <Link to="/users" className="workspace-chip-link">
                 Access

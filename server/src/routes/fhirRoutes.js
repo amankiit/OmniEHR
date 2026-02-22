@@ -10,6 +10,7 @@ import AllergyIntolerance from "../models/AllergyIntolerance.js";
 import MedicationRequest from "../models/MedicationRequest.js";
 import Encounter from "../models/Encounter.js";
 import Appointment from "../models/Appointment.js";
+import Task from "../models/Task.js";
 import User from "../models/User.js";
 import {
   patientDocToResource,
@@ -26,6 +27,8 @@ import {
   encounterResourceToDoc,
   appointmentDocToResource,
   appointmentResourceToDoc,
+  taskDocToResource,
+  taskResourceToDoc,
   toSearchsetBundle
 } from "../services/fhirMapper.js";
 import {
@@ -39,7 +42,8 @@ import {
   allergyIntoleranceResourceSchema,
   medicationRequestResourceSchema,
   encounterResourceSchema,
-  appointmentResourceSchema
+  appointmentResourceSchema,
+  taskResourceSchema
 } from "../services/validation.js";
 
 const router = express.Router();
@@ -87,6 +91,16 @@ const ensureBookingPermission = (requestingUser, practitionerUserId) => {
     String(practitionerUserId) !== String(requestingUser.sub)
   ) {
     throw new ApiError(403, "Practitioners can only book appointments under their own schedule");
+  }
+};
+
+const ensureTaskOwnerPermission = (requestingUser, ownerUserId) => {
+  if (requestingUser.role !== "practitioner") {
+    return;
+  }
+
+  if (!ownerUserId || String(ownerUserId) !== String(requestingUser.sub)) {
+    throw new ApiError(403, "Practitioners can only assign or update tasks under their own worklist");
   }
 };
 
@@ -198,7 +212,8 @@ router.get(
             { type: "AllergyIntolerance", interaction: resourceInteractions },
             { type: "MedicationRequest", interaction: resourceInteractions },
             { type: "Encounter", interaction: resourceInteractions },
-            { type: "Appointment", interaction: resourceInteractions }
+            { type: "Appointment", interaction: resourceInteractions },
+            { type: "Task", interaction: resourceInteractions }
           ]
         }
       ]
@@ -313,14 +328,15 @@ router.get(
       throw new ApiError(404, "Patient not found");
     }
 
-    const [observations, conditions, allergies, medications, encounters, appointments] =
+    const [observations, conditions, allergies, medications, encounters, appointments, tasks] =
       await Promise.all([
         Observation.find({ "subject.reference": req.params.id }).sort({ effectiveDateTime: -1 }),
         Condition.find({ "subject.reference": req.params.id }).sort({ recordedDate: -1, createdAt: -1 }),
         AllergyIntolerance.find({ "patient.reference": req.params.id }).sort({ recordedDate: -1, createdAt: -1 }),
         MedicationRequest.find({ "subject.reference": req.params.id }).sort({ authoredOn: -1, createdAt: -1 }),
         Encounter.find({ "subject.reference": req.params.id }).sort({ periodStart: -1, createdAt: -1 }),
-        Appointment.find({ "patient.reference": req.params.id }).sort({ start: -1, createdAt: -1 })
+        Appointment.find({ "patient.reference": req.params.id }).sort({ start: -1, createdAt: -1 }),
+        Task.find({ "for.reference": req.params.id }).sort({ dueDate: 1, authoredOn: -1, createdAt: -1 })
       ]);
 
     const allResources = [
@@ -330,7 +346,8 @@ router.get(
       ...medications.map(medicationRequestDocToResource),
       ...encounters.map(encounterDocToResource),
       ...observations.map(observationDocToResource),
-      ...appointments.map(appointmentDocToResource)
+      ...appointments.map(appointmentDocToResource),
+      ...tasks.map(taskDocToResource)
     ];
 
     res.json({
@@ -937,6 +954,147 @@ router.put(
     }
 
     res.json(appointmentDocToResource(record));
+  })
+);
+
+router.post(
+  "/Task",
+  authorize(...writeRoles),
+  asyncHandler(async (req, res) => {
+    const resource = taskResourceSchema.parse(req.body);
+    const docPayload = taskResourceToDoc(resource);
+
+    await ensurePatientExists(docPayload.for.reference);
+
+    let ownerUserId = docPayload.ownerUserId;
+    if (req.user.role === "practitioner") {
+      ownerUserId = req.user.sub;
+    }
+    ensureTaskOwnerPermission(req.user, ownerUserId);
+
+    let ownerName = docPayload.ownerName;
+    if (ownerUserId) {
+      await ensurePractitionerExists(ownerUserId);
+      const owner = await User.findById(ownerUserId).select("fullName").lean();
+      ownerName = owner?.fullName || ownerName;
+    }
+
+    const record = await Task.create({
+      ...docPayload,
+      ownerUserId,
+      ownerName,
+      createdBy: req.user.sub
+    });
+
+    res.status(201).json(taskDocToResource(record));
+  })
+);
+
+router.get(
+  "/Task",
+  authorize(...readRoles),
+  asyncHandler(async (req, res) => {
+    const filter = {};
+
+    if (req.query.for) {
+      filter["for.reference"] = parsePatientReference(req.query.for, "for");
+    }
+
+    if (req.query.status) {
+      filter.status = String(req.query.status);
+    }
+
+    if (req.user.role === "practitioner") {
+      filter.ownerUserId = req.user.sub;
+    }
+
+    if (req.query.owner) {
+      const [resourceType, ownerId] = String(req.query.owner).split("/");
+      if (resourceType !== "Practitioner" || !ownerId) {
+        throw new ApiError(400, "owner must be in Practitioner/{id} format");
+      }
+
+      ensureTaskOwnerPermission(req.user, ownerId);
+      filter.ownerUserId = ownerId;
+    }
+
+    const records = await Task.find(filter).sort({ dueDate: 1, authoredOn: -1, createdAt: -1 }).limit(300);
+    const resources = records.map(taskDocToResource);
+
+    res.json(
+      toSearchsetBundle({
+        resourceType: "Task",
+        resources,
+        total: resources.length,
+        baseUrl: baseUrl(req),
+        searchId: randomUUID()
+      })
+    );
+  })
+);
+
+router.get(
+  "/Task/:id",
+  authorize(...readRoles),
+  asyncHandler(async (req, res) => {
+    const record = await Task.findById(req.params.id);
+
+    if (!record) {
+      throw new ApiError(404, "Task not found");
+    }
+
+    ensureTaskOwnerPermission(req.user, record.ownerUserId);
+
+    res.json(taskDocToResource(record));
+  })
+);
+
+router.put(
+  "/Task/:id",
+  authorize(...writeRoles),
+  asyncHandler(async (req, res) => {
+    const resource = taskResourceSchema.parse(req.body);
+    const docPayload = taskResourceToDoc(resource);
+    const existingRecord = await Task.findById(req.params.id).select("ownerUserId");
+
+    if (!existingRecord) {
+      throw new ApiError(404, "Task not found");
+    }
+
+    ensureTaskOwnerPermission(req.user, existingRecord.ownerUserId);
+    await ensurePatientExists(docPayload.for.reference);
+
+    let ownerUserId = docPayload.ownerUserId;
+    if (req.user.role === "practitioner") {
+      ownerUserId = req.user.sub;
+    }
+    ensureTaskOwnerPermission(req.user, ownerUserId);
+
+    let ownerName = docPayload.ownerName;
+    if (ownerUserId) {
+      await ensurePractitionerExists(ownerUserId);
+      const owner = await User.findById(ownerUserId).select("fullName").lean();
+      ownerName = owner?.fullName || ownerName;
+    }
+
+    const record = await Task.findByIdAndUpdate(
+      req.params.id,
+      {
+        ...docPayload,
+        ownerUserId,
+        ownerName
+      },
+      {
+        new: true,
+        runValidators: true
+      }
+    );
+
+    if (!record) {
+      throw new ApiError(404, "Task not found");
+    }
+
+    res.json(taskDocToResource(record));
   })
 );
 

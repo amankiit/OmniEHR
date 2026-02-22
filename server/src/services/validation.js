@@ -214,6 +214,15 @@ const medicationCodingSchema = z.object({
   display: z.string().trim().optional()
 });
 
+const reasonCodeSchema = z
+  .object({
+    text: z.string().trim().min(1).optional(),
+    coding: z.array(conditionCodingSchema).min(1).optional()
+  })
+  .refine((value) => Boolean(value.text) || Boolean(value.coding?.length), {
+    message: "reasonCode item must include text or coding"
+  });
+
 export const medicationRequestResourceSchema = z.object({
   resourceType: z.literal("MedicationRequest"),
   status: z
@@ -255,11 +264,7 @@ export const medicationRequestResourceSchema = z.object({
     )
     .optional(),
   reasonCode: z
-    .array(
-      z.object({
-        coding: z.array(conditionCodingSchema).min(1)
-      })
-    )
+    .array(reasonCodeSchema)
     .optional(),
   dispenseRequest: z
     .object({
@@ -320,11 +325,7 @@ export const encounterResourceSchema = z.object({
     })
     .optional(),
   reasonCode: z
-    .array(
-      z.object({
-        coding: z.array(conditionCodingSchema).min(1)
-      })
-    )
+    .array(reasonCodeSchema)
     .optional(),
   location: z
     .array(
@@ -436,6 +437,60 @@ export const appointmentResourceSchema = z
       message: "end must be after start"
     }
   );
+
+const taskOwnerReferenceSchema = z
+  .string()
+  .regex(/^Practitioner\/[a-fA-F0-9]{24}$/, "owner.reference must be Practitioner/{id}");
+
+const taskPatientReferenceSchema = z
+  .string()
+  .regex(/^Patient\/[a-fA-F0-9]{24}$/, "for.reference must be Patient/{id}");
+
+export const taskResourceSchema = z.object({
+  resourceType: z.literal("Task"),
+  status: z
+    .enum([
+      "draft",
+      "requested",
+      "received",
+      "accepted",
+      "rejected",
+      "ready",
+      "cancelled",
+      "in-progress",
+      "on-hold",
+      "failed",
+      "completed",
+      "entered-in-error"
+    ])
+    .optional(),
+  intent: z.string().trim().optional(),
+  priority: z.enum(["routine", "urgent", "asap", "stat"]).optional(),
+  code: z
+    .object({
+      text: z.string().trim().optional(),
+      coding: z.array(encounterCodingSchema).optional()
+    })
+    .optional(),
+  description: z.string().trim().min(1),
+  for: z.object({
+    reference: taskPatientReferenceSchema
+  }),
+  owner: z
+    .object({
+      reference: taskOwnerReferenceSchema.optional(),
+      display: z.string().trim().optional()
+    })
+    .optional(),
+  authoredOn: z.string().datetime().optional(),
+  executionPeriod: z
+    .object({
+      start: z.string().datetime().optional(),
+      end: z.string().datetime().optional()
+    })
+    .optional(),
+  note: z.array(z.object({ text: z.string().trim().min(1) })).optional()
+});
 
 export const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).optional().default(1),

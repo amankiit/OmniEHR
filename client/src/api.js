@@ -96,7 +96,15 @@ export const fhirApi = {
   listAppointments: (token, params = {}) =>
     apiRequest(`/fhir/Appointment${toQueryString(params)}`, { token }),
   createAppointment: (token, resource) =>
-    apiRequest("/fhir/Appointment", { method: "POST", token, body: resource })
+    apiRequest("/fhir/Appointment", { method: "POST", token, body: resource }),
+  updateAppointment: (token, id, resource) =>
+    apiRequest(`/fhir/Appointment/${id}`, { method: "PUT", token, body: resource }),
+
+  listTasks: (token, params = {}) => apiRequest(`/fhir/Task${toQueryString(params)}`, { token }),
+  createTask: (token, resource) =>
+    apiRequest("/fhir/Task", { method: "POST", token, body: resource }),
+  updateTask: (token, id, resource) =>
+    apiRequest(`/fhir/Task/${id}`, { method: "PUT", token, body: resource })
 };
 
 export const adminApi = {

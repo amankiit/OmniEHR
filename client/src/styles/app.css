@@ -604,6 +604,71 @@ select option:disabled {
   font-size: 1.05rem;
 }
 
+.risk-chip,
+.priority-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.16rem 0.54rem;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.risk-chip-high {
+  background: #fde8e6;
+  border: 1px solid #f3c6c1;
+  color: #8f2d25;
+}
+
+.risk-chip-medium {
+  background: #fff4df;
+  border: 1px solid #f2d7a8;
+  color: #7a5419;
+}
+
+.risk-chip-low {
+  background: #e8f5ec;
+  border: 1px solid #bee2c8;
+  color: #1f6640;
+}
+
+.priority-chip-routine {
+  background: #f0f3f6;
+  border: 1px solid #ccd4dc;
+  color: #34424f;
+}
+
+.priority-chip-urgent,
+.priority-chip-asap {
+  background: #fff2de;
+  border: 1px solid #edcc95;
+  color: #755114;
+}
+
+.priority-chip-stat {
+  background: #fde9e8;
+  border: 1px solid #efc2be;
+  color: #8e3128;
+}
+
+.plain-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.status-text-overdue {
+  margin-top: 0.2rem;
+  color: #8e3128;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
 .metric-value {
   font-size: clamp(1.55rem, 3vw, 1.95rem);
   font-weight: 800;

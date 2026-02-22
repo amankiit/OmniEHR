@@ -111,7 +111,8 @@ export const splitEverythingBundle = (bundle) => {
     allergies: [],
     medications: [],
     encounters: [],
-    appointments: []
+    appointments: [],
+    tasks: []
   };
 
   resources.forEach((resource) => {
@@ -136,6 +137,9 @@ export const splitEverythingBundle = (bundle) => {
         break;
       case "Appointment":
         grouped.appointments.push(resource);
+        break;
+      case "Task":
+        grouped.tasks.push(resource);
         break;
       default:
         break;

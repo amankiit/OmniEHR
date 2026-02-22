@@ -50,6 +50,8 @@ This repository implements major technical safeguards (access control, audit tra
   - Fixed booking windows: Monday-Saturday, 09:00 AM-12:00 PM, 15-minute slots
   - Unavailable slots are disabled in slot dropdowns
   - Overlap conflicts block booking for unavailable practitioners
+- Clinical command center for risk stratification, care-gap detection, and service-line demand
+- Care-team task management (`Task`) with assignment, due dates, and status workflow
 - Audit log review for admin/auditor roles
 
 ## FHIR API endpoints
@@ -100,6 +102,12 @@ Appointment:
 - `GET /Appointment`
 - `GET /Appointment/:id`
 - `PUT /Appointment/:id`
+
+Task:
+- `POST /Task`
+- `GET /Task`
+- `GET /Task/:id`
+- `PUT /Task/:id`
 
 Admin:
 - `GET /api/admin/practitioners`

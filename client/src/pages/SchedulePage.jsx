@@ -7,6 +7,7 @@ import {
   getPractitionerIdFromAppointment,
   SERVICE_CATEGORY_OPTIONS,
   getSlotRange,
+  isBlockingAppointmentStatus,
   isBookableDateInput,
   isSlotUnavailable,
   practitionerHasAvailableSlot
@@ -18,6 +19,7 @@ import {
   patientIdentifier,
   reasonText
 } from "../utils/fhir.js";
+import { calculateNoShowRate, calculateServiceMix } from "../utils/clinicalOps.js";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const canEdit = (role) => role === "admin" || role === "practitioner";
@@ -42,6 +44,8 @@ const SchedulePage = () => {
   const [form, setForm] = useState(emptyForm);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [serviceFilter, setServiceFilter] = useState("all");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -296,6 +300,62 @@ const SchedulePage = () => {
     return participant?.actor?.display || participant?.actor?.reference || "-";
   };
 
+  const serviceFilterOptions = useMemo(() => {
+    const dynamicOptions = appointments
+      .map(
+        (appointment) =>
+          appointment?.serviceCategory?.[0]?.text ||
+          appointment?.serviceCategory?.[0]?.coding?.[0]?.display ||
+          ""
+      )
+      .filter(Boolean);
+
+    return Array.from(new Set([...SERVICE_CATEGORY_OPTIONS, ...dynamicOptions])).sort();
+  }, [appointments]);
+
+  const filteredAppointments = useMemo(() => {
+    return appointments.filter((appointment) => {
+      if (statusFilter !== "all" && appointment.status !== statusFilter) {
+        return false;
+      }
+
+      const service =
+        appointment?.serviceCategory?.[0]?.text ||
+        appointment?.serviceCategory?.[0]?.coding?.[0]?.display ||
+        "Unspecified";
+
+      if (serviceFilter !== "all" && service !== serviceFilter) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [appointments, serviceFilter, statusFilter]);
+
+  const operationsSnapshot = useMemo(() => {
+    const totalSlots = buildDailySlots().length * scopedPractitioners.length;
+    const bookedSlots = slotAppointments.filter((appointment) =>
+      isBlockingAppointmentStatus(appointment.status)
+    ).length;
+    const fillRate = totalSlots > 0 ? Math.round((bookedSlots / totalSlots) * 1000) / 10 : 0;
+    const checkedInCount = appointments.filter((appointment) =>
+      ["arrived", "checked-in", "fulfilled"].includes(appointment.status)
+    ).length;
+    const waitlistCount = appointments.filter((appointment) => appointment.status === "waitlist").length;
+    const noShowRate = calculateNoShowRate(appointments, 90);
+    const serviceMix = calculateServiceMix(filteredAppointments).slice(0, 3);
+
+    return {
+      fillRate,
+      bookedSlots,
+      totalSlots,
+      checkedInCount,
+      waitlistCount,
+      noShowRate,
+      serviceMix
+    };
+  }, [appointments, filteredAppointments, scopedPractitioners.length, slotAppointments]);
+
   const hasAvailableSlots = slotOptions.some((slot) => !slot.unavailable);
 
   const canSubmit =
@@ -437,6 +497,31 @@ const SchedulePage = () => {
         </form>
       ) : null}
 
+      <article className="stats-grid">
+        <div className="metric-card">
+          <h2>Selected-day fill rate</h2>
+          <p className="metric-value">{operationsSnapshot.fillRate}%</p>
+          <p className="muted-text">
+            {operationsSnapshot.bookedSlots}/{operationsSnapshot.totalSlots} bookable slots used.
+          </p>
+        </div>
+        <div className="metric-card">
+          <h2>No-show rate</h2>
+          <p className="metric-value">{operationsSnapshot.noShowRate}%</p>
+          <p className="muted-text">Trailing 90-day trend.</p>
+        </div>
+        <div className="metric-card">
+          <h2>Checked-in visits</h2>
+          <p className="metric-value">{operationsSnapshot.checkedInCount}</p>
+          <p className="muted-text">Arrived/checked-in/fulfilled in current query window.</p>
+        </div>
+        <div className="metric-card">
+          <h2>Waitlist</h2>
+          <p className="metric-value">{operationsSnapshot.waitlistCount}</p>
+          <p className="muted-text">Appointments currently on waitlist status.</p>
+        </div>
+      </article>
+
       <article className="card form-grid two-columns">
         <h2>Schedule filters</h2>
         <label>
@@ -451,10 +536,42 @@ const SchedulePage = () => {
           To
           <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
         </label>
+        <label>
+          Status
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="all">All statuses</option>
+            <option value="booked">booked</option>
+            <option value="arrived">arrived</option>
+            <option value="checked-in">checked-in</option>
+            <option value="fulfilled">fulfilled</option>
+            <option value="waitlist">waitlist</option>
+            <option value="noshow">noshow</option>
+            <option value="cancelled">cancelled</option>
+          </select>
+        </label>
+        <label>
+          Service category
+          <select value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}>
+            <option value="all">All services</option>
+            {serviceFilterOptions.map((service) => (
+              <option key={service} value={service}>
+                {service}
+              </option>
+            ))}
+          </select>
+        </label>
       </article>
 
       <article className="card">
         <h2>Upcoming and historical appointments</h2>
+        {operationsSnapshot.serviceMix.length > 0 ? (
+          <p className="muted-text">
+            Top service mix:{" "}
+            {operationsSnapshot.serviceMix
+              .map((item) => `${item.service} (${item.count})`)
+              .join(" | ")}
+          </p>
+        ) : null}
         <div className="table-scroll">
           <table>
             <thead>
@@ -468,7 +585,7 @@ const SchedulePage = () => {
               </tr>
             </thead>
             <tbody>
-              {appointments.map((appointment) => (
+              {filteredAppointments.map((appointment) => (
                 <tr key={appointment.id}>
                   <td>{formatDateTime(appointment.start)}</td>
                   <td>{formatDateTime(appointment.end)}</td>

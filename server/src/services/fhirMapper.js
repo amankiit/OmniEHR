@@ -389,6 +389,7 @@ export const medicationRequestResourceToDoc = (resource) => {
 
   const medicationCoding = pickCoding(resource.medicationCodeableConcept);
   const reasonCoding = pickCoding(resource.reasonCode?.[0]);
+  const reasonText = sanitize(resource.reasonCode?.[0]?.text);
   const quantity = resource.dispenseRequest?.quantity;
 
   return {
@@ -407,7 +408,7 @@ export const medicationRequestResourceToDoc = (resource) => {
     reasonCode: {
       system: sanitize(reasonCoding.system),
       code: sanitize(reasonCoding.code),
-      display: sanitize(reasonCoding.display)
+      display: sanitize(reasonCoding.display || reasonText)
     },
     dispenseRequest: {
       numberOfRepeatsAllowed:
@@ -423,6 +424,7 @@ export const medicationRequestResourceToDoc = (resource) => {
 
 export const medicationRequestDocToResource = (doc) => {
   const reasonCoding = doc.reasonCode?.code ? [codingFromDoc(doc.reasonCode)] : [];
+  const reasonText = sanitize(doc.reasonCode?.display || doc.reasonCode?.code);
 
   return {
     resourceType: "MedicationRequest",
@@ -442,7 +444,15 @@ export const medicationRequestDocToResource = (doc) => {
     },
     authoredOn: toDateTime(doc.authoredOn),
     dosageInstruction: doc.dosageInstruction ? [{ text: doc.dosageInstruction }] : undefined,
-    reasonCode: reasonCoding.length > 0 ? [{ coding: reasonCoding }] : undefined,
+    reasonCode:
+      reasonCoding.length > 0 || reasonText
+        ? [
+            {
+              coding: reasonCoding.length > 0 ? reasonCoding : undefined,
+              text: reasonText || undefined
+            }
+          ]
+        : undefined,
     dispenseRequest:
       doc.dispenseRequest?.numberOfRepeatsAllowed !== undefined ||
       doc.dispenseRequest?.quantityValue !== undefined
@@ -468,6 +478,7 @@ export const encounterResourceToDoc = (resource) => {
 
   const typeCoding = pickCoding(resource.type?.[0]);
   const reasonCoding = pickCoding(resource.reasonCode?.[0]);
+  const reasonText = sanitize(resource.reasonCode?.[0]?.text);
 
   return {
     status: sanitize(resource.status) || "in-progress",
@@ -485,7 +496,7 @@ export const encounterResourceToDoc = (resource) => {
     reasonCode: {
       system: sanitize(reasonCoding.system),
       code: sanitize(reasonCoding.code),
-      display: sanitize(reasonCoding.display)
+      display: sanitize(reasonCoding.display || reasonText)
     },
     location: sanitize(resource.location?.[0]?.location?.display),
     serviceProvider: sanitize(resource.serviceProvider?.display),
@@ -499,6 +510,7 @@ export const encounterResourceToDoc = (resource) => {
 
 export const encounterDocToResource = (doc) => {
   const reasonCoding = doc.reasonCode?.code ? [codingFromDoc(doc.reasonCode)] : [];
+  const reasonText = sanitize(doc.reasonCode?.display || doc.reasonCode?.code);
 
   return {
     resourceType: "Encounter",
@@ -528,7 +540,15 @@ export const encounterDocToResource = (doc) => {
       start: toDateTime(doc.periodStart),
       end: toDateTime(doc.periodEnd)
     },
-    reasonCode: reasonCoding.length > 0 ? [{ coding: reasonCoding }] : undefined,
+    reasonCode:
+      reasonCoding.length > 0 || reasonText
+        ? [
+            {
+              coding: reasonCoding.length > 0 ? reasonCoding : undefined,
+              text: reasonText || undefined
+            }
+          ]
+        : undefined,
     location: doc.location ? [{ location: { display: doc.location } }] : undefined,
     serviceProvider: doc.serviceProvider ? { display: doc.serviceProvider } : undefined,
     participant: (doc.participant || []).map((participant) => ({
@@ -613,6 +633,62 @@ export const appointmentDocToResource = (doc) => {
     participant,
     reasonCode: doc.reason ? [{ text: doc.reason }] : undefined,
     comment: doc.comment
+  };
+};
+
+export const taskResourceToDoc = (resource) => {
+  if (resource.resourceType !== "Task") {
+    throw new ApiError(400, "Expected a Task resource");
+  }
+
+  const coding = pickCoding(resource.code);
+  const ownerReference = sanitize(resource.owner?.reference);
+
+  return {
+    status: sanitize(resource.status) || "requested",
+    intent: sanitize(resource.intent) || "order",
+    priority: sanitize(resource.priority) || "routine",
+    codeText: sanitize(resource.code?.text || coding?.display || coding?.code),
+    description: sanitize(resource.description),
+    for: {
+      reference: parsePatientReference(resource.for?.reference, "for.reference")
+    },
+    ownerUserId: ownerReference
+      ? parseReference(ownerReference, "Practitioner", "owner.reference")
+      : undefined,
+    ownerName: sanitize(resource.owner?.display),
+    authoredOn: parseDateTime(resource.authoredOn, new Date()),
+    dueDate: parseDateTime(resource.executionPeriod?.end),
+    note: sanitize(resource.note?.[0]?.text)
+  };
+};
+
+export const taskDocToResource = (doc) => {
+  return {
+    resourceType: "Task",
+    id: String(doc._id),
+    meta: {
+      versionId: String(doc.__v),
+      lastUpdated: doc.updatedAt?.toISOString()
+    },
+    status: doc.status,
+    intent: doc.intent,
+    priority: doc.priority,
+    code: doc.codeText ? { text: doc.codeText } : undefined,
+    description: doc.description,
+    for: {
+      reference: `Patient/${doc.for?.reference}`
+    },
+    owner:
+      doc.ownerUserId || doc.ownerName
+        ? {
+            reference: doc.ownerUserId ? `Practitioner/${doc.ownerUserId}` : undefined,
+            display: doc.ownerName
+          }
+        : undefined,
+    authoredOn: toDateTime(doc.authoredOn),
+    executionPeriod: doc.dueDate ? { end: toDateTime(doc.dueDate) } : undefined,
+    note: doc.note ? [{ text: doc.note }] : undefined
   };
 };
 

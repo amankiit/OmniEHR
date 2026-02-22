@@ -27,6 +27,11 @@ import {
   isSlotUnavailable,
   practitionerHasAvailableSlot
 } from "../utils/scheduling.js";
+import {
+  buildPatientRiskProfile,
+  getTaskDueDate,
+  isTaskOverdue
+} from "../utils/clinicalOps.js";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const canEdit = (role) => role === "admin" || role === "practitioner";
@@ -38,7 +43,8 @@ const initialChart = {
   allergies: [],
   medications: [],
   encounters: [],
-  appointments: []
+  appointments: [],
+  tasks: []
 };
 
 const emptyObservation = {
@@ -94,6 +100,15 @@ const emptyAppointment = {
   comment: ""
 };
 
+const emptyTask = {
+  description: "",
+  priority: "routine",
+  category: "Care coordination",
+  dueDate: "",
+  note: "",
+  ownerId: ""
+};
+
 const PatientDetailPage = () => {
   const { id } = useParams();
   const { token, user } = useAuth();
@@ -104,6 +119,7 @@ const PatientDetailPage = () => {
   const [medicationForm, setMedicationForm] = useState(emptyMedication);
   const [encounterForm, setEncounterForm] = useState(emptyEncounter);
   const [appointmentForm, setAppointmentForm] = useState(emptyAppointment);
+  const [taskForm, setTaskForm] = useState(emptyTask);
   const [practitioners, setPractitioners] = useState([]);
   const [slotAppointments, setSlotAppointments] = useState([]);
   const [error, setError] = useState("");
@@ -111,19 +127,22 @@ const PatientDetailPage = () => {
   const [initialLoading, setInitialLoading] = useState(true);
 
   const load = async () => {
-    const [patientResource, practitionerResponse] = await Promise.all([
+    const [patientResource, practitionerResponse, taskBundle] = await Promise.all([
       fhirApi.getPatient(token, id),
-      adminApi.listPractitioners(token)
+      adminApi.listPractitioners(token),
+      fhirApi.listTasks(token, { for: `Patient/${id}` })
     ]);
 
-    let grouped = { ...initialChart, patient: patientResource };
+    const taskResources = bundleToResources(taskBundle);
+    let grouped = { ...initialChart, patient: patientResource, tasks: taskResources };
 
     try {
       const everythingBundle = await fhirApi.getPatientEverything(token, id);
       const split = splitEverythingBundle(everythingBundle);
       grouped = {
         ...split,
-        patient: split.patient || patientResource
+        patient: split.patient || patientResource,
+        tasks: split.tasks.length ? split.tasks : taskResources
       };
     } catch {
       // Keep demographics visible even if $everything is temporarily unavailable.
@@ -141,6 +160,18 @@ const PatientDetailPage = () => {
           : prev.practitionerId || practitionerRecords[0]?.id || "";
 
       return { ...prev, practitionerId: defaultPractitionerId };
+    });
+
+    setTaskForm((prev) => {
+      const defaultOwnerId =
+        user.role === "practitioner"
+          ? user.id
+          : prev.ownerId || practitionerRecords[0]?.id || "";
+
+      return {
+        ...prev,
+        ownerId: defaultOwnerId
+      };
     });
   };
 
@@ -194,6 +225,14 @@ const PatientDetailPage = () => {
     });
     return map;
   }, [practitioners]);
+
+  const taskOwnerOptions = useMemo(() => {
+    if (user.role === "practitioner") {
+      return practitioners.filter((practitioner) => practitioner.id === user.id);
+    }
+
+    return practitioners;
+  }, [practitioners, user.id, user.role]);
 
   const slotOptions = useMemo(() => {
     const slots = buildDailySlots();
@@ -554,6 +593,75 @@ const PatientDetailPage = () => {
     });
   };
 
+  const onCreateTask = async (event) => {
+    event.preventDefault();
+
+    await submitClinicalResource({
+      request: () => {
+        const ownerId = user.role === "practitioner" ? user.id : taskForm.ownerId;
+        const owner = practitionerMap.get(ownerId);
+        const dueIso = taskForm.dueDate
+          ? new Date(`${taskForm.dueDate}T23:59:59`).toISOString()
+          : undefined;
+
+        return fhirApi.createTask(token, {
+          resourceType: "Task",
+          status: "requested",
+          intent: "order",
+          priority: taskForm.priority,
+          code: taskForm.category ? { text: taskForm.category } : undefined,
+          description: taskForm.description.trim(),
+          for: {
+            reference: `Patient/${id}`
+          },
+          owner: ownerId
+            ? {
+                reference: `Practitioner/${ownerId}`,
+                display: owner?.fullName
+              }
+            : undefined,
+          authoredOn: new Date().toISOString(),
+          executionPeriod: dueIso ? { end: dueIso } : undefined,
+          note: taskForm.note ? [{ text: taskForm.note.trim() }] : undefined
+        });
+      },
+      onSuccess: () => setTaskForm((prev) => ({ ...emptyTask, ownerId: prev.ownerId }))
+    });
+  };
+
+  const onUpdateTaskStatus = async (task, nextStatus) => {
+    await submitClinicalResource({
+      request: () =>
+        fhirApi.updateTask(token, task.id, {
+          ...task,
+          status: nextStatus
+        }),
+      onSuccess: () => {}
+    });
+  };
+
+  const riskProfile = useMemo(
+    () =>
+      buildPatientRiskProfile({
+        conditions: chart.conditions,
+        allergies: chart.allergies,
+        medications: chart.medications,
+        observations: chart.observations,
+        encounters: chart.encounters,
+        appointments: chart.appointments,
+        tasks: chart.tasks
+      }),
+    [
+      chart.allergies,
+      chart.appointments,
+      chart.conditions,
+      chart.encounters,
+      chart.medications,
+      chart.observations,
+      chart.tasks
+    ]
+  );
+
   if (initialLoading) {
     return <p>Loading patient...</p>;
   }
@@ -640,6 +748,61 @@ const PatientDetailPage = () => {
         <div className="metric-card">
           <h2>Appointments</h2>
           <p className="metric-value">{chart.appointments.length}</p>
+        </div>
+        <div className="metric-card">
+          <h2>Care tasks</h2>
+          <p className="metric-value">{chart.tasks.length}</p>
+        </div>
+      </article>
+
+      <article className="card form-grid two-columns">
+        <h2>Clinical decision support</h2>
+        <div className="metric-card">
+          <h3>Risk tier</h3>
+          <p className="metric-value">
+            <span className={`risk-chip risk-chip-${riskProfile.tier}`}>
+              {riskProfile.tier} ({riskProfile.score})
+            </span>
+          </p>
+          <p className="muted-text">
+            {riskProfile.openTaskCount} open tasks, {riskProfile.overdueTaskCount} overdue.
+          </p>
+        </div>
+        <div className="metric-card">
+          <h3>Latest vitals</h3>
+          <p className="muted-text">
+            BP: {riskProfile.latestVitals.systolic || "-"} / {riskProfile.latestVitals.diastolic || "-"} mmHg
+          </p>
+          <p className="muted-text">HbA1c: {riskProfile.latestVitals.a1c || "-"}</p>
+        </div>
+        <div>
+          <h3>Safety alerts</h3>
+          {riskProfile.safetyAlerts.length === 0 ? (
+            <p className="muted-text">No active alerts.</p>
+          ) : (
+            <ul className="plain-list">
+              {riskProfile.safetyAlerts.map((alert) => (
+                <li key={`${alert.title}-${alert.detail}`}>
+                  <span className={`risk-chip risk-chip-${alert.severity}`}>{alert.severity}</span>{" "}
+                  {alert.title}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div>
+          <h3>Open care gaps</h3>
+          {riskProfile.careGaps.length === 0 ? (
+            <p className="muted-text">No open care gaps.</p>
+          ) : (
+            <ul className="plain-list">
+              {riskProfile.careGaps.map((gap) => (
+                <li key={`${gap.title}-${gap.detail}`}>
+                  <span className={`risk-chip risk-chip-${gap.severity}`}>{gap.severity}</span> {gap.title}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </article>
 
@@ -1093,6 +1256,88 @@ const PatientDetailPage = () => {
               {loading ? "Saving..." : "Schedule appointment"}
             </button>
           </form>
+
+          <form className="card form-grid two-columns" onSubmit={onCreateTask}>
+            <h2>Create care task</h2>
+            <label>
+              Assignee
+              <select
+                value={user.role === "practitioner" ? user.id : taskForm.ownerId}
+                onChange={(event) =>
+                  setTaskForm((prev) => ({ ...prev, ownerId: event.target.value }))
+                }
+                disabled={user.role === "practitioner"}
+              >
+                {user.role === "admin" ? <option value="">Unassigned</option> : null}
+                {taskOwnerOptions.map((practitioner) => (
+                  <option key={practitioner.id} value={practitioner.id}>
+                    {practitioner.fullName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Priority
+              <select
+                value={taskForm.priority}
+                onChange={(event) =>
+                  setTaskForm((prev) => ({ ...prev, priority: event.target.value }))
+                }
+              >
+                <option value="routine">routine</option>
+                <option value="urgent">urgent</option>
+                <option value="asap">asap</option>
+                <option value="stat">stat</option>
+              </select>
+            </label>
+            <label>
+              Category
+              <select
+                value={taskForm.category}
+                onChange={(event) =>
+                  setTaskForm((prev) => ({ ...prev, category: event.target.value }))
+                }
+              >
+                <option value="Care coordination">Care coordination</option>
+                <option value="Medication reconciliation">Medication reconciliation</option>
+                <option value="Lab follow-up">Lab follow-up</option>
+                <option value="Preventive screening">Preventive screening</option>
+              </select>
+            </label>
+            <label>
+              Due date
+              <input
+                type="date"
+                value={taskForm.dueDate}
+                onChange={(event) =>
+                  setTaskForm((prev) => ({ ...prev, dueDate: event.target.value }))
+                }
+              />
+            </label>
+            <label className="label-span-2">
+              Task summary
+              <input
+                value={taskForm.description}
+                onChange={(event) =>
+                  setTaskForm((prev) => ({ ...prev, description: event.target.value }))
+                }
+                required
+              />
+            </label>
+            <label className="label-span-2">
+              Note
+              <textarea
+                rows="2"
+                value={taskForm.note}
+                onChange={(event) =>
+                  setTaskForm((prev) => ({ ...prev, note: event.target.value }))
+                }
+              />
+            </label>
+            <button type="submit" className="button" disabled={loading}>
+              {loading ? "Saving..." : "Create care task"}
+            </button>
+          </form>
         </>
       ) : null}
 
@@ -1241,6 +1486,63 @@ const PatientDetailPage = () => {
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article className="card">
+        <h2>Care tasks</h2>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Created</th>
+                <th>Task</th>
+                <th>Owner</th>
+                <th>Priority</th>
+                <th>Due</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {chart.tasks.map((task) => (
+                <tr key={task.id}>
+                  <td>{formatDateTime(task.authoredOn)}</td>
+                  <td>
+                    <p>{task.description || "-"}</p>
+                    <p className="muted-text">{task.code?.text || "-"}</p>
+                  </td>
+                  <td>{task.owner?.display || "-"}</td>
+                  <td>
+                    <span className={`priority-chip priority-chip-${task.priority || "routine"}`}>
+                      {task.priority || "routine"}
+                    </span>
+                  </td>
+                  <td>
+                    {formatDateTime(getTaskDueDate(task))}
+                    {isTaskOverdue(task) ? <p className="status-text-overdue">Overdue</p> : null}
+                  </td>
+                  <td>
+                    {canEdit(user.role) ? (
+                      <select
+                        value={task.status}
+                        onChange={(event) => onUpdateTaskStatus(task, event.target.value)}
+                        disabled={loading}
+                      >
+                        <option value="requested">requested</option>
+                        <option value="accepted">accepted</option>
+                        <option value="in-progress">in-progress</option>
+                        <option value="on-hold">on-hold</option>
+                        <option value="completed">completed</option>
+                        <option value="cancelled">cancelled</option>
+                      </select>
+                    ) : (
+                      task.status || "-"
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
