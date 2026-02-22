@@ -279,7 +279,7 @@ const NavBar = () => {
         <div className="sidebar-top">
           <Link to="/" className="sidebar-brand" onClick={closeMenu}>
             <span className="sidebar-brand-mark">O</span>
-            <div>
+            <div className="sidebar-brand-copy">
               <strong>OmniEHR</strong>
               <p>HIPAA & FHIR compliant</p>
             </div>
