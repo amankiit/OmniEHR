@@ -14,12 +14,16 @@ import { errorHandler, notFoundHandler } from "./middleware/error.js";
 const app = express();
 
 app.use(helmet());
-app.use(
-  cors({
-    origin: env.corsOrigin,
-    credentials: true
-  })
-);
+app.use(cors({
+  origin: [
+    "http://localhost:5173",
+    "https://omni-ehr.vercel.app"
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  credentials: true
+}));
+
+app.options("*", cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(morgan("combined"));
 
