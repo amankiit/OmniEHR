@@ -1,6 +1,23 @@
 export const SLOT_INTERVAL_MINUTES = 15;
 export const CLINIC_OPEN_MINUTES = 9 * 60;
 export const CLINIC_CLOSE_MINUTES = 12 * 60;
+export const SERVICE_CATEGORY_OPTIONS = [
+  "Outpatient",
+  "Follow-up",
+  "Primary Care",
+  "Preventive Care",
+  "Annual Wellness Visit",
+  "Chronic Disease Management",
+  "Medication Review",
+  "Post-Discharge Follow-up",
+  "Urgent Care",
+  "Behavioral Health",
+  "Cardiology Consultation",
+  "Dermatology Consultation",
+  "Orthopedic Consultation",
+  "Telehealth Visit",
+  "Immunization"
+];
 
 const nonBlockingStatuses = new Set(["cancelled", "noshow", "entered-in-error"]);
 const bookableWeekdays = new Set([1, 2, 3, 4, 5, 6]);

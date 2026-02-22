@@ -278,10 +278,10 @@ const NavBar = () => {
       <aside id="sidebar-nav" className={menuOpen ? "sidebar sidebar-open" : "sidebar"}>
         <div className="sidebar-top">
           <Link to="/" className="sidebar-brand" onClick={closeMenu}>
-            <span className="sidebar-brand-mark">A</span>
+            <span className="sidebar-brand-mark">O</span>
             <div>
               <strong>OmniEHR</strong>
-              <p>Clinical workspace</p>
+              <p>HIPAA & FHIR compliant</p>
             </div>
           </Link>
         </div>

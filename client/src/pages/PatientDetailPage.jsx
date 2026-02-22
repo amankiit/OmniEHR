@@ -21,6 +21,7 @@ import {
   getDayRangeFromDateInput,
   getNextBookableDateInput,
   getPractitionerIdFromAppointment,
+  SERVICE_CATEGORY_OPTIONS,
   getSlotRange,
   isBookableDateInput,
   isSlotUnavailable,
@@ -766,7 +767,7 @@ const PatientDetailPage = () => {
                 <option value="severe">Severe</option>
               </select>
             </label>
-            <button type="submit" className="button" disabled={loading}>
+            <button type="submit" className="button form-submit-start" disabled={loading}>
               {loading ? "Saving..." : "Add allergy"}
             </button>
           </form>
@@ -1007,12 +1008,19 @@ const PatientDetailPage = () => {
             </label>
             <label>
               Service category
-              <input
+              <select
                 value={appointmentForm.serviceCategory}
                 onChange={(event) =>
                   setAppointmentForm((prev) => ({ ...prev, serviceCategory: event.target.value }))
                 }
-              />
+                required
+              >
+                {SERVICE_CATEGORY_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               Slot

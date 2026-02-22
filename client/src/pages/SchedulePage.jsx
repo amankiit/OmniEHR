@@ -5,6 +5,7 @@ import {
   getDayRangeFromDateInput,
   getNextBookableDateInput,
   getPractitionerIdFromAppointment,
+  SERVICE_CATEGORY_OPTIONS,
   getSlotRange,
   isBookableDateInput,
   isSlotUnavailable,
@@ -311,22 +312,6 @@ const SchedulePage = () => {
       <p className="muted-text">Appointment scheduling in 15-minute slots (09:00 AM-12:00 PM, Mon-Sat).</p>
       {error ? <p className="banner banner-error">{error}</p> : null}
 
-      <article className="card form-grid two-columns">
-        <h2>Schedule filters</h2>
-        <label>
-          From
-          <input
-            type="date"
-            value={fromDate}
-            onChange={(event) => setFromDate(event.target.value)}
-          />
-        </label>
-        <label>
-          To
-          <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
-        </label>
-      </article>
-
       {canEdit(user.role) ? (
         <form className="card form-grid two-columns" onSubmit={onCreateAppointment}>
           <h2>Book appointment</h2>
@@ -395,12 +380,19 @@ const SchedulePage = () => {
 
           <label>
             Service category
-            <input
+            <select
               value={form.serviceCategory}
               onChange={(event) =>
                 setForm((prev) => ({ ...prev, serviceCategory: event.target.value }))
               }
-            />
+              required
+            >
+              {SERVICE_CATEGORY_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             Reason
@@ -444,6 +436,22 @@ const SchedulePage = () => {
           </button>
         </form>
       ) : null}
+
+      <article className="card form-grid two-columns">
+        <h2>Schedule filters</h2>
+        <label>
+          From
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(event) => setFromDate(event.target.value)}
+          />
+        </label>
+        <label>
+          To
+          <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
+        </label>
+      </article>
 
       <article className="card">
         <h2>Upcoming and historical appointments</h2>
