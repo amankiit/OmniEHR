@@ -1,18 +1,23 @@
 # OmniEHR
-<img width="1470" height="833" alt="Screenshot 2026-02-22 at 3 21 17 PM" src="https://github.com/user-attachments/assets/f5d0c87d-2d05-49e6-bb59-29a11e5a3690" />
+<img width="1470" height="831" alt="Screenshot 2026-02-22 at 4 02 12 PM" src="https://github.com/user-attachments/assets/81b1027a-099c-4339-8eea-722f004b1bc1" />
+
 
 Electronic Health Record application with FHIR R4-shaped APIs and HIPAA-aligned controls.
 
 Access here:
 https://omni-ehr.vercel.app
 
-Admin login credentials:
-email - admin@omnihealth.com
-password - Abcdefgh@998761
+## 🔐 Demo Login Credentials
 
-Practitioner login credentials:
-email - drsonal@omnihealth.com
-password - Abcdefgh@998761
+### 👨‍💼 Admin Login
+**Email:** admin@omnihealth.com  
+**Password:** Abcdefgh@998761
+
+---
+
+### 🩺 Practitioner Login
+**Email:** drsonal@omnihealth.com  
+**Password:** Abcdefgh@998761
 
 ## Compliance note
 
