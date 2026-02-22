@@ -1,6 +1,8 @@
 # OmniEHR (Expanded Clinical Core)
 
 MERN-based Electronic Health Record application with FHIR R4-shaped APIs and HIPAA-aligned controls.
+Access here:
+https://omni-ehr.vercel.app
 
 ## Compliance note
 
