@@ -1,0 +1,638 @@
+import { encryptPhi, decryptPhi } from "./cryptoService.js";
+import { ApiError } from "../utils/apiError.js";
+import { PID_SYSTEM } from "./patientPidService.js";
+
+const dateOnlyToDate = (value) => {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return undefined;
+  }
+
+  return parsed;
+};
+
+const toDateOnly = (value) => {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return undefined;
+  }
+
+  return parsed.toISOString().slice(0, 10);
+};
+
+const toDateTime = (value) => {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return undefined;
+  }
+
+  return parsed.toISOString();
+};
+
+const sanitize = (value) => {
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  return String(value).trim();
+};
+
+const pickTelecom = (telecom = [], system) => {
+  return telecom.find((entry) => entry.system === system)?.value || "";
+};
+
+const pickCoding = (codeableConcept) => {
+  return codeableConcept?.coding?.[0] || {};
+};
+
+const codingFromDoc = (coding) => ({
+  system: coding?.system,
+  code: coding?.code,
+  display: coding?.display
+});
+
+const parseReference = (reference, expectedType, fieldPath) => {
+  const parts = String(reference || "").split("/");
+  if (parts.length !== 2 || parts[0] !== expectedType || !parts[1]) {
+    throw new ApiError(400, `${fieldPath} must be in ${expectedType}/{id} format`);
+  }
+
+  return parts[1];
+};
+
+const parsePatientReference = (reference, fieldPath = "subject.reference") => {
+  return parseReference(reference, "Patient", fieldPath);
+};
+
+const parseStatusCode = (codeableConcept, fallback) => {
+  return sanitize(codeableConcept?.coding?.[0]?.code) || fallback;
+};
+
+const parseDateTime = (value, fallback) => {
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return fallback;
+  }
+
+  return parsed;
+};
+
+export const patientResourceToDoc = (resource) => {
+  if (resource.resourceType !== "Patient") {
+    throw new ApiError(400, "Expected a Patient resource");
+  }
+
+  const name = resource.name?.[0] || {};
+  const address = resource.address?.[0] || {};
+
+  return {
+    identifier: (resource.identifier || []).map((identifier) => ({
+      system: sanitize(identifier.system),
+      value: sanitize(identifier.value)
+    })),
+    active: resource.active ?? true,
+    gender: resource.gender || "unknown",
+    birthDate: dateOnlyToDate(resource.birthDate),
+    phi: {
+      givenName: encryptPhi(sanitize(name.given?.[0])),
+      familyName: encryptPhi(sanitize(name.family)),
+      phone: encryptPhi(sanitize(pickTelecom(resource.telecom, "phone"))),
+      email: encryptPhi(sanitize(pickTelecom(resource.telecom, "email"))),
+      line1: encryptPhi(sanitize(address.line?.[0])),
+      city: encryptPhi(sanitize(address.city)),
+      state: encryptPhi(sanitize(address.state)),
+      postalCode: encryptPhi(sanitize(address.postalCode))
+    }
+  };
+};
+
+export const patientDocToResource = (doc) => {
+  const givenName = decryptPhi(doc.phi?.givenName);
+  const familyName = decryptPhi(doc.phi?.familyName);
+  const phone = decryptPhi(doc.phi?.phone);
+  const email = decryptPhi(doc.phi?.email);
+  const line1 = decryptPhi(doc.phi?.line1);
+  const city = decryptPhi(doc.phi?.city);
+  const state = decryptPhi(doc.phi?.state);
+  const postalCode = decryptPhi(doc.phi?.postalCode);
+
+  const telecom = [];
+  if (phone) {
+    telecom.push({ system: "phone", value: phone, use: "mobile" });
+  }
+  if (email) {
+    telecom.push({ system: "email", value: email, use: "home" });
+  }
+
+  const address = [];
+  if (line1 || city || state || postalCode) {
+    address.push({
+      line: line1 ? [line1] : [],
+      city,
+      state,
+      postalCode,
+      country: "US"
+    });
+  }
+
+  const baseIdentifiers = Array.isArray(doc.identifier) ? doc.identifier : [];
+  const pidFromIdentifier = baseIdentifiers.find(
+    (identifier) => sanitize(identifier?.system) === PID_SYSTEM
+  )?.value;
+  const pidValue = sanitize(doc.pid) || sanitize(pidFromIdentifier);
+  const nonPidIdentifiers = baseIdentifiers.filter(
+    (identifier) => sanitize(identifier?.system) !== PID_SYSTEM
+  );
+  const identifier = pidValue
+    ? [{ system: PID_SYSTEM, value: pidValue }, ...nonPidIdentifiers]
+    : nonPidIdentifiers;
+
+  return {
+    resourceType: "Patient",
+    id: String(doc._id),
+    meta: {
+      versionId: String(doc.__v),
+      lastUpdated: doc.updatedAt?.toISOString()
+    },
+    identifier,
+    active: doc.active,
+    name: [
+      {
+        use: "official",
+        family: familyName,
+        given: givenName ? [givenName] : []
+      }
+    ],
+    telecom,
+    gender: doc.gender,
+    birthDate: toDateOnly(doc.birthDate),
+    address
+  };
+};
+
+export const observationResourceToDoc = (resource) => {
+  if (resource.resourceType !== "Observation") {
+    throw new ApiError(400, "Expected an Observation resource");
+  }
+
+  const coding = pickCoding(resource.code);
+
+  return {
+    status: resource.status || "final",
+    code: {
+      system: sanitize(coding.system),
+      code: sanitize(coding.code),
+      display: sanitize(coding.display)
+    },
+    subject: {
+      reference: parsePatientReference(resource.subject?.reference)
+    },
+    effectiveDateTime: parseDateTime(resource.effectiveDateTime, new Date()),
+    issued: parseDateTime(resource.issued, new Date()),
+    valueQuantity: resource.valueQuantity
+      ? {
+          value: Number(resource.valueQuantity.value),
+          unit: sanitize(resource.valueQuantity.unit),
+          system: sanitize(resource.valueQuantity.system),
+          code: sanitize(resource.valueQuantity.code)
+        }
+      : undefined,
+    note: sanitize(resource.note?.[0]?.text)
+  };
+};
+
+export const observationDocToResource = (doc) => {
+  return {
+    resourceType: "Observation",
+    id: String(doc._id),
+    meta: {
+      versionId: String(doc.__v),
+      lastUpdated: doc.updatedAt?.toISOString()
+    },
+    status: doc.status,
+    code: {
+      coding: [codingFromDoc(doc.code)],
+      text: doc.code?.display || doc.code?.code
+    },
+    subject: {
+      reference: `Patient/${doc.subject?.reference}`
+    },
+    effectiveDateTime: toDateTime(doc.effectiveDateTime),
+    issued: toDateTime(doc.issued),
+    valueQuantity: doc.valueQuantity?.value !== undefined ? doc.valueQuantity : undefined,
+    note: doc.note ? [{ text: doc.note }] : undefined
+  };
+};
+
+export const conditionResourceToDoc = (resource) => {
+  if (resource.resourceType !== "Condition") {
+    throw new ApiError(400, "Expected a Condition resource");
+  }
+
+  const coding = pickCoding(resource.code);
+  const reasonStatus = parseStatusCode(resource.clinicalStatus, "active");
+  const verificationStatus = parseStatusCode(resource.verificationStatus, "confirmed");
+
+  return {
+    clinicalStatus: reasonStatus,
+    verificationStatus,
+    code: {
+      system: sanitize(coding.system),
+      code: sanitize(coding.code),
+      display: sanitize(coding.display)
+    },
+    subject: {
+      reference: parsePatientReference(resource.subject?.reference)
+    },
+    onsetDateTime: parseDateTime(resource.onsetDateTime),
+    recordedDate: parseDateTime(resource.recordedDate, new Date()),
+    note: sanitize(resource.note?.[0]?.text)
+  };
+};
+
+export const conditionDocToResource = (doc) => {
+  return {
+    resourceType: "Condition",
+    id: String(doc._id),
+    meta: {
+      versionId: String(doc.__v),
+      lastUpdated: doc.updatedAt?.toISOString()
+    },
+    clinicalStatus: {
+      coding: [
+        {
+          system: "http://terminology.hl7.org/CodeSystem/condition-clinical",
+          code: doc.clinicalStatus,
+          display: doc.clinicalStatus
+        }
+      ]
+    },
+    verificationStatus: {
+      coding: [
+        {
+          system: "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+          code: doc.verificationStatus,
+          display: doc.verificationStatus
+        }
+      ]
+    },
+    code: {
+      coding: [codingFromDoc(doc.code)],
+      text: doc.code?.display || doc.code?.code
+    },
+    subject: {
+      reference: `Patient/${doc.subject?.reference}`
+    },
+    onsetDateTime: toDateTime(doc.onsetDateTime),
+    recordedDate: toDateTime(doc.recordedDate),
+    note: doc.note ? [{ text: doc.note }] : undefined
+  };
+};
+
+export const allergyIntoleranceResourceToDoc = (resource) => {
+  if (resource.resourceType !== "AllergyIntolerance") {
+    throw new ApiError(400, "Expected an AllergyIntolerance resource");
+  }
+
+  const coding = pickCoding(resource.code);
+
+  return {
+    clinicalStatus: parseStatusCode(resource.clinicalStatus, "active"),
+    verificationStatus: parseStatusCode(resource.verificationStatus, "confirmed"),
+    type: sanitize(resource.type) || "allergy",
+    category: resource.category || [],
+    criticality: sanitize(resource.criticality) || "unable-to-assess",
+    code: {
+      system: sanitize(coding.system),
+      code: sanitize(coding.code),
+      display: sanitize(coding.display)
+    },
+    patient: {
+      reference: parsePatientReference(resource.patient?.reference, "patient.reference")
+    },
+    recordedDate: parseDateTime(resource.recordedDate, new Date()),
+    reaction: (resource.reaction || []).map((reaction) => ({
+      substanceText: sanitize(reaction.substance?.text),
+      manifestation: (reaction.manifestation || []).map((item) => sanitize(item.text)).filter(Boolean),
+      severity: sanitize(reaction.severity),
+      description: sanitize(reaction.description)
+    }))
+  };
+};
+
+export const allergyIntoleranceDocToResource = (doc) => {
+  return {
+    resourceType: "AllergyIntolerance",
+    id: String(doc._id),
+    meta: {
+      versionId: String(doc.__v),
+      lastUpdated: doc.updatedAt?.toISOString()
+    },
+    clinicalStatus: {
+      coding: [
+        {
+          system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+          code: doc.clinicalStatus,
+          display: doc.clinicalStatus
+        }
+      ]
+    },
+    verificationStatus: {
+      coding: [
+        {
+          system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+          code: doc.verificationStatus,
+          display: doc.verificationStatus
+        }
+      ]
+    },
+    type: doc.type,
+    category: doc.category,
+    criticality: doc.criticality,
+    code: {
+      coding: [codingFromDoc(doc.code)],
+      text: doc.code?.display || doc.code?.code
+    },
+    patient: {
+      reference: `Patient/${doc.patient?.reference}`
+    },
+    recordedDate: toDateTime(doc.recordedDate),
+    reaction: (doc.reaction || []).map((reaction) => ({
+      substance: reaction.substanceText ? { text: reaction.substanceText } : undefined,
+      manifestation: (reaction.manifestation || []).map((text) => ({ text })),
+      severity: reaction.severity,
+      description: reaction.description
+    }))
+  };
+};
+
+export const medicationRequestResourceToDoc = (resource) => {
+  if (resource.resourceType !== "MedicationRequest") {
+    throw new ApiError(400, "Expected a MedicationRequest resource");
+  }
+
+  const medicationCoding = pickCoding(resource.medicationCodeableConcept);
+  const reasonCoding = pickCoding(resource.reasonCode?.[0]);
+  const quantity = resource.dispenseRequest?.quantity;
+
+  return {
+    status: sanitize(resource.status) || "active",
+    intent: sanitize(resource.intent) || "order",
+    medication: {
+      system: sanitize(medicationCoding.system),
+      code: sanitize(medicationCoding.code),
+      display: sanitize(medicationCoding.display)
+    },
+    subject: {
+      reference: parsePatientReference(resource.subject?.reference)
+    },
+    authoredOn: parseDateTime(resource.authoredOn, new Date()),
+    dosageInstruction: sanitize(resource.dosageInstruction?.[0]?.text),
+    reasonCode: {
+      system: sanitize(reasonCoding.system),
+      code: sanitize(reasonCoding.code),
+      display: sanitize(reasonCoding.display)
+    },
+    dispenseRequest: {
+      numberOfRepeatsAllowed:
+        resource.dispenseRequest?.numberOfRepeatsAllowed !== undefined
+          ? Number(resource.dispenseRequest.numberOfRepeatsAllowed)
+          : undefined,
+      quantityValue: quantity?.value !== undefined ? Number(quantity.value) : undefined,
+      quantityUnit: sanitize(quantity?.unit)
+    },
+    note: sanitize(resource.note?.[0]?.text)
+  };
+};
+
+export const medicationRequestDocToResource = (doc) => {
+  const reasonCoding = doc.reasonCode?.code ? [codingFromDoc(doc.reasonCode)] : [];
+
+  return {
+    resourceType: "MedicationRequest",
+    id: String(doc._id),
+    meta: {
+      versionId: String(doc.__v),
+      lastUpdated: doc.updatedAt?.toISOString()
+    },
+    status: doc.status,
+    intent: doc.intent,
+    medicationCodeableConcept: {
+      coding: [codingFromDoc(doc.medication)],
+      text: doc.medication?.display || doc.medication?.code
+    },
+    subject: {
+      reference: `Patient/${doc.subject?.reference}`
+    },
+    authoredOn: toDateTime(doc.authoredOn),
+    dosageInstruction: doc.dosageInstruction ? [{ text: doc.dosageInstruction }] : undefined,
+    reasonCode: reasonCoding.length > 0 ? [{ coding: reasonCoding }] : undefined,
+    dispenseRequest:
+      doc.dispenseRequest?.numberOfRepeatsAllowed !== undefined ||
+      doc.dispenseRequest?.quantityValue !== undefined
+        ? {
+            numberOfRepeatsAllowed: doc.dispenseRequest.numberOfRepeatsAllowed,
+            quantity:
+              doc.dispenseRequest.quantityValue !== undefined
+                ? {
+                    value: doc.dispenseRequest.quantityValue,
+                    unit: doc.dispenseRequest.quantityUnit
+                  }
+                : undefined
+          }
+        : undefined,
+    note: doc.note ? [{ text: doc.note }] : undefined
+  };
+};
+
+export const encounterResourceToDoc = (resource) => {
+  if (resource.resourceType !== "Encounter") {
+    throw new ApiError(400, "Expected an Encounter resource");
+  }
+
+  const typeCoding = pickCoding(resource.type?.[0]);
+  const reasonCoding = pickCoding(resource.reasonCode?.[0]);
+
+  return {
+    status: sanitize(resource.status) || "in-progress",
+    classCode: sanitize(resource.class?.code) || "AMB",
+    type: {
+      system: sanitize(typeCoding.system),
+      code: sanitize(typeCoding.code),
+      display: sanitize(typeCoding.display)
+    },
+    subject: {
+      reference: parsePatientReference(resource.subject?.reference)
+    },
+    periodStart: parseDateTime(resource.period?.start, new Date()),
+    periodEnd: parseDateTime(resource.period?.end),
+    reasonCode: {
+      system: sanitize(reasonCoding.system),
+      code: sanitize(reasonCoding.code),
+      display: sanitize(reasonCoding.display)
+    },
+    location: sanitize(resource.location?.[0]?.location?.display),
+    serviceProvider: sanitize(resource.serviceProvider?.display),
+    participant: (resource.participant || []).map((participant) => ({
+      type: sanitize(participant.type?.[0]?.text),
+      individualDisplay: sanitize(participant.individual?.display)
+    })),
+    note: sanitize(resource.note?.[0]?.text)
+  };
+};
+
+export const encounterDocToResource = (doc) => {
+  const reasonCoding = doc.reasonCode?.code ? [codingFromDoc(doc.reasonCode)] : [];
+
+  return {
+    resourceType: "Encounter",
+    id: String(doc._id),
+    meta: {
+      versionId: String(doc.__v),
+      lastUpdated: doc.updatedAt?.toISOString()
+    },
+    status: doc.status,
+    class: {
+      system: "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+      code: doc.classCode,
+      display: doc.classCode
+    },
+    type: doc.type?.code
+      ? [
+          {
+            coding: [codingFromDoc(doc.type)],
+            text: doc.type?.display || doc.type?.code
+          }
+        ]
+      : undefined,
+    subject: {
+      reference: `Patient/${doc.subject?.reference}`
+    },
+    period: {
+      start: toDateTime(doc.periodStart),
+      end: toDateTime(doc.periodEnd)
+    },
+    reasonCode: reasonCoding.length > 0 ? [{ coding: reasonCoding }] : undefined,
+    location: doc.location ? [{ location: { display: doc.location } }] : undefined,
+    serviceProvider: doc.serviceProvider ? { display: doc.serviceProvider } : undefined,
+    participant: (doc.participant || []).map((participant) => ({
+      type: participant.type ? [{ text: participant.type }] : undefined,
+      individual: participant.individualDisplay ? { display: participant.individualDisplay } : undefined
+    })),
+    note: doc.note ? [{ text: doc.note }] : undefined
+  };
+};
+
+export const appointmentResourceToDoc = (resource) => {
+  if (resource.resourceType !== "Appointment") {
+    throw new ApiError(400, "Expected an Appointment resource");
+  }
+
+  const patientParticipant = resource.participant.find((participant) =>
+    String(participant.actor?.reference || "").startsWith("Patient/")
+  );
+  const practitionerParticipant = resource.participant.find((participant) => {
+    return String(participant.actor?.reference || "").startsWith("Practitioner/");
+  });
+  const serviceCategory = resource.serviceCategory?.[0];
+
+  return {
+    status: sanitize(resource.status) || "booked",
+    description: sanitize(resource.description),
+    serviceCategory: sanitize(serviceCategory?.text || pickCoding(serviceCategory)?.display),
+    start: parseDateTime(resource.start, new Date()),
+    end: parseDateTime(resource.end, new Date()),
+    minutesDuration:
+      resource.minutesDuration !== undefined ? Number(resource.minutesDuration) : undefined,
+    patient: {
+      reference: parsePatientReference(patientParticipant?.actor?.reference, "participant.actor.reference")
+    },
+    practitionerUserId: parseReference(
+      practitionerParticipant?.actor?.reference,
+      "Practitioner",
+      "participant.actor.reference"
+    ),
+    practitionerName: sanitize(
+      practitionerParticipant?.actor?.display ||
+        practitionerParticipant?.actor?.reference
+    ),
+    reason: sanitize(resource.reasonCode?.[0]?.text || pickCoding(resource.reasonCode?.[0])?.display),
+    comment: sanitize(resource.comment)
+  };
+};
+
+export const appointmentDocToResource = (doc) => {
+  const participant = [
+    {
+      actor: {
+        reference: `Patient/${doc.patient?.reference}`
+      },
+      status: "accepted"
+    }
+  ];
+
+  if (doc.practitionerName || doc.practitionerUserId) {
+    participant.push({
+      actor: {
+        reference: doc.practitionerUserId ? `Practitioner/${doc.practitionerUserId}` : undefined,
+        display: doc.practitionerName
+      },
+      status: "accepted"
+    });
+  }
+
+  return {
+    resourceType: "Appointment",
+    id: String(doc._id),
+    meta: {
+      versionId: String(doc.__v),
+      lastUpdated: doc.updatedAt?.toISOString()
+    },
+    status: doc.status,
+    description: doc.description,
+    serviceCategory: doc.serviceCategory ? [{ text: doc.serviceCategory }] : undefined,
+    start: toDateTime(doc.start),
+    end: toDateTime(doc.end),
+    minutesDuration: doc.minutesDuration,
+    participant,
+    reasonCode: doc.reason ? [{ text: doc.reason }] : undefined,
+    comment: doc.comment
+  };
+};
+
+export const toSearchsetBundle = ({
+  resourceType,
+  resources,
+  baseUrl,
+  total,
+  searchId
+}) => {
+  return {
+    resourceType: "Bundle",
+    id: searchId || undefined,
+    type: "searchset",
+    timestamp: new Date().toISOString(),
+    total,
+    entry: resources.map((resource) => ({
+      fullUrl: `${baseUrl}/${resourceType}/${resource.id}`,
+      resource,
+      search: { mode: "match" }
+    }))
+  };
+};
