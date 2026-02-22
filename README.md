@@ -1,6 +1,4 @@
 <img width="1470" height="833" alt="Screenshot 2026-02-22 at 3 21 17 PM" src="https://github.com/user-attachments/assets/f5d0c87d-2d05-49e6-bb59-29a11e5a3690" /># OmniEHR (Expanded Clinical Core)
-<img width="1470" height="833" alt="Screenshot 2026-02-22 at 3 21 17 PM" src="https://github.com/user-attachments/assets/2d7e170b-7ab0-41d0-8eb2-cfe57b454509" />
-
 
 Electronic Health Record application with FHIR R4-shaped APIs and HIPAA-aligned controls.
 Access here:
